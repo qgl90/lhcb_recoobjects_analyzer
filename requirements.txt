@@ -1,0 +1,6 @@
+awkward
+matplotlib
+mplhep
+numpy
+uproot
+
