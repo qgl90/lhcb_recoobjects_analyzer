@@ -22,9 +22,13 @@ This script studies how a `chi2/ndof` cut changes track selection.
    - `phi`
    - split into fake and matched-truth tracks
 
+3. **Response curves versus kinematics**
+   - truth-track efficiency vs `p`, `pT`, `eta`, `phi`
+   - fake-track rejection vs `p`, `pT`, `eta`, `phi`
+   - one panel per variable with curves for each requested cut
+
 ## Notes
 
 - The distributions are normalized so shape changes are easier to compare.
 - The study reuses the track-composition loader rather than materializing full track objects.
 - This makes it suitable for quick scans of multiple `chi2/ndof` thresholds.
-

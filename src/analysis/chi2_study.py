@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+from matplotlib.lines import Line2D
 
 from .composition import TrackCompositionSample, _prepare_matplotlib, _scale_figure, _track_features, load_track_composition_sample
 
@@ -216,6 +217,105 @@ def plot_cut_distributions(sample: TrackCompositionSample, cuts: list[float], ou
 
     output_path = Path(output_path)
     fig.suptitle("Track kinematics under chi2/ndof cuts")
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+    return output_path
+
+
+def _variable_bins(values: np.ndarray, logx: bool, bins: int = 40) -> np.ndarray:
+    finite_values = values[np.isfinite(values)]
+    if logx:
+        finite_values = finite_values[finite_values > 0]
+    if len(finite_values) == 0:
+        raise ValueError("no finite values available for binning")
+    if logx:
+        xmin = max(np.min(finite_values), 1e-6)
+        xmax = np.max(finite_values)
+        return np.logspace(np.log10(xmin), np.log10(xmax), bins)
+    return np.linspace(np.min(finite_values), np.max(finite_values), bins)
+
+
+def plot_cut_variable_response(sample: TrackCompositionSample, cuts: list[float], output_path: str | Path) -> Path:
+    plt = _prepare_matplotlib()
+    features = _track_features(sample)
+    valid_mask = _valid_chi2_mask(sample)
+    fake_mask = sample.fake_mask & valid_mask
+    truth_mask = sample.truth_mask & valid_mask
+
+    variables = [
+        ("p", features["p"], True, "p [MeV]"),
+        ("pt", features["pt"], True, "pT [MeV]"),
+        ("eta", features["eta"], False, "eta"),
+        ("phi", features["phi"], False, "phi"),
+    ]
+    colors = plt.cm.viridis(np.linspace(0.1, 0.9, len(cuts)))
+
+    fig, axes = plt.subplots(2, 2, figsize=(13, 10), constrained_layout=True)
+    _scale_figure(fig)
+
+    style_handles = [
+        Line2D([0], [0], color="black", linestyle="-", linewidth=2, label="matched truth efficiency"),
+        Line2D([0], [0], color="black", linestyle="--", linewidth=2, label="fake rejection"),
+    ]
+
+    for ax, (variable_name, values, logx, xlabel) in zip(axes.flat, variables, strict=False):
+        truth_values = values[truth_mask]
+        fake_values = values[fake_mask]
+        finite_truth = truth_values[np.isfinite(truth_values)]
+        finite_fake = fake_values[np.isfinite(fake_values)]
+        if logx:
+            finite_truth = finite_truth[finite_truth > 0]
+            finite_fake = finite_fake[finite_fake > 0]
+        combined = np.concatenate([finite_truth, finite_fake]) if len(finite_truth) and len(finite_fake) else (
+            finite_truth if len(finite_truth) else finite_fake
+        )
+        bins = _variable_bins(combined, logx=logx)
+        centers = 0.5 * (bins[:-1] + bins[1:])
+        truth_hist, _ = np.histogram(finite_truth, bins=bins)
+        fake_hist, _ = np.histogram(finite_fake, bins=bins)
+
+        for color, cut in zip(colors, cuts, strict=False):
+            selected = valid_mask & (sample.chi2ndof < cut)
+            truth_sel_values = values[selected & sample.truth_mask]
+            fake_sel_values = values[selected & sample.fake_mask]
+            truth_sel_values = truth_sel_values[np.isfinite(truth_sel_values)]
+            fake_sel_values = fake_sel_values[np.isfinite(fake_sel_values)]
+            if logx:
+                truth_sel_values = truth_sel_values[truth_sel_values > 0]
+                fake_sel_values = fake_sel_values[fake_sel_values > 0]
+            truth_sel_hist, _ = np.histogram(truth_sel_values, bins=bins)
+            fake_sel_hist, _ = np.histogram(fake_sel_values, bins=bins)
+
+            truth_eff = np.divide(
+                truth_sel_hist,
+                truth_hist,
+                out=np.full_like(truth_sel_hist, np.nan, dtype=float),
+                where=truth_hist > 0,
+            )
+            fake_eff = np.divide(
+                fake_sel_hist,
+                fake_hist,
+                out=np.full_like(fake_sel_hist, np.nan, dtype=float),
+                where=fake_hist > 0,
+            )
+            fake_rejection = 1.0 - fake_eff
+
+            ax.plot(centers, truth_eff, color=color, linewidth=2, linestyle="-", alpha=0.95, label=f"< {cut:g}")
+            ax.plot(centers, fake_rejection, color=color, linewidth=2, linestyle="--", alpha=0.95)
+
+        ax.set_title(f"Response vs {variable_name}")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel("efficiency / rejection")
+        ax.set_ylim(0, 1.05)
+        if logx:
+            ax.set_xscale("log")
+        ax.grid(True, alpha=0.2)
+
+    axes[0, 0].legend(frameon=False, fontsize=8, title="chi2/ndof cut", loc="lower left")
+    axes[0, 1].legend(handles=style_handles, frameon=False, fontsize=8, loc="lower left")
+
+    output_path = Path(output_path)
+    fig.suptitle("chi2/ndof response in track kinematics")
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
     return output_path
