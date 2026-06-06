@@ -49,6 +49,7 @@ The runner can generate:
 - fake-track kinematic distributions
 - fake-vs-truth histograms and 2D maps
 - ghost-rate plots
+- truth-matched momentum and pT resolution checks using reconstructed-state `qop`, `tx`, and `ty`
 - per-event fake rate versus number of PVs
 - per-event track multiplicity versus number of PVs
 
@@ -57,8 +58,9 @@ The runner can generate:
 1. Load a `.root` file with `uproot`
 2. Materialize fake tracks or event-level summaries
 3. Inspect `tx`, `ty`, `qop`, `p`, `pt`, `eta`, `phi`, and `chi2/ndof`
-4. Compare fake and truth distributions
-5. Study event-level fake rate versus PV multiplicity
+4. For truth-matched tracks, compare reconstructed `p = 1 / |qop|` and slope-derived `pT` against MC truth momentum
+5. Compare fake and truth distributions
+6. Study event-level fake rate versus PV multiplicity
 
 ## Validation
 
