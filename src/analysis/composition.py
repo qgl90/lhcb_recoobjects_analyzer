@@ -25,6 +25,9 @@ class TrackCompositionSample:
     tx: np.ndarray
     ty: np.ndarray
     qop: np.ndarray
+    mc_px: np.ndarray
+    mc_py: np.ndarray
+    mc_pz: np.ndarray
     chi2ndof: np.ndarray
 
     @property
@@ -74,6 +77,9 @@ def _track_level_branch_names() -> list[str]:
         "FirstMeasurement_tx",
         "FirstMeasurement_ty",
         "FirstMeasurement_qop",
+        "MC_px",
+        "MC_py",
+        "MC_pz",
         "Track_chi2ndof",
     ]
     return branches
@@ -88,10 +94,17 @@ def _track_truth_hit_mask(hit_mc: ak.Array, hit_counts: ak.Array) -> np.ndarray:
     return np.concatenate(masks) if masks else np.asarray([], dtype=bool)
 
 
-def load_track_composition_sample(path: str | Path, limit: int | None = None) -> TrackCompositionSample:
+def load_track_composition_sample(
+    path: str | Path, limit: int | None = None
+) -> TrackCompositionSample:
     tree = _tree_from_file(path)
     n_events = int(tree.num_entries if limit is None else min(tree.num_entries, limit))
-    arrays = tree.arrays(library="ak", entry_start=0, entry_stop=n_events, filter_name=_track_level_branch_names())
+    arrays = tree.arrays(
+        library="ak",
+        entry_start=0,
+        entry_stop=n_events,
+        filter_name=_track_level_branch_names(),
+    )
 
     def flat(name: str) -> np.ndarray:
         return np.asarray(ak.to_numpy(ak.flatten(arrays[name])))
@@ -106,16 +119,25 @@ def load_track_composition_sample(path: str | Path, limit: int | None = None) ->
         up_hits=flat("UPHits_n"),
         ft_hits=flat("FTHits_n"),
         mp_hits=flat("MPHits_n"),
-        ft_truth_hit_mask=_track_truth_hit_mask(arrays["FTHits_mc_x"], arrays["FTHits_n"]),
-        mp_truth_hit_mask=_track_truth_hit_mask(arrays["MPHits_mc_x"], arrays["MPHits_n"]),
+        ft_truth_hit_mask=_track_truth_hit_mask(
+            arrays["FTHits_mc_x"], arrays["FTHits_n"]
+        ),
+        mp_truth_hit_mask=_track_truth_hit_mask(
+            arrays["MPHits_mc_x"], arrays["MPHits_n"]
+        ),
         tx=flat("FirstMeasurement_tx"),
         ty=flat("FirstMeasurement_ty"),
         qop=flat("FirstMeasurement_qop"),
+        mc_px=flat("MC_px"),
+        mc_py=flat("MC_py"),
+        mc_pz=flat("MC_pz"),
         chi2ndof=flat("Track_chi2ndof"),
     )
 
 
-def load_event_composition_sample(path: str | Path, limit: int | None = None) -> EventCompositionSample:
+def load_event_composition_sample(
+    path: str | Path, limit: int | None = None
+) -> EventCompositionSample:
     tree = _tree_from_file(path)
     n_events = int(tree.num_entries if limit is None else min(tree.num_entries, limit))
     arrays = tree.arrays(
@@ -155,7 +177,9 @@ def load_event_composition_sample(path: str | Path, limit: int | None = None) ->
     )
 
 
-def load_event_fake_pv_sample(path: str | Path, limit: int | None = None) -> EventFakePvSample:
+def load_event_fake_pv_sample(
+    path: str | Path, limit: int | None = None
+) -> EventFakePvSample:
     tree = _tree_from_file(path)
     n_events = int(tree.num_entries if limit is None else min(tree.num_entries, limit))
     arrays = tree.arrays(
@@ -198,7 +222,12 @@ def load_event_fake_pv_sample(path: str | Path, limit: int | None = None) -> Eve
 def _track_features(sample: TrackCompositionSample) -> dict[str, np.ndarray]:
     slope2 = sample.tx * sample.tx + sample.ty * sample.ty
     direction_norm = np.sqrt(1.0 + slope2)
-    p = np.divide(1.0, np.abs(sample.qop), out=np.full_like(sample.qop, np.inf, dtype=float), where=sample.qop != 0)
+    p = np.divide(
+        1.0,
+        np.abs(sample.qop),
+        out=np.full_like(sample.qop, np.inf, dtype=float),
+        where=sample.qop != 0,
+    )
     pt = np.where(np.isfinite(p), p * np.sqrt(slope2) / direction_norm, np.nan)
     pz = np.where(np.isfinite(p), p / direction_norm, np.nan)
     ratio = np.divide(pz, pt, out=np.full_like(pz, np.nan, dtype=float), where=pt != 0)
@@ -212,6 +241,111 @@ def _track_features(sample: TrackCompositionSample) -> dict[str, np.ndarray]:
         "phi": phi,
         "chi2ndof": sample.chi2ndof,
     }
+
+
+def _truth_features(sample: TrackCompositionSample) -> dict[str, np.ndarray]:
+    truth_p2 = (
+        sample.mc_px * sample.mc_px
+        + sample.mc_py * sample.mc_py
+        + sample.mc_pz * sample.mc_pz
+    )
+    truth_pt2 = sample.mc_px * sample.mc_px + sample.mc_py * sample.mc_py
+    truth_p = np.sqrt(truth_p2)
+    truth_pt = np.sqrt(truth_pt2)
+    truth_eta = np.divide(
+        sample.mc_pz,
+        truth_pt,
+        out=np.full_like(sample.mc_pz, np.nan, dtype=float),
+        where=truth_pt > 0,
+    )
+    truth_eta = np.arcsinh(truth_eta)
+    truth_phi = np.arctan2(sample.mc_py, sample.mc_px)
+    return {
+        "truth_p": truth_p,
+        "truth_pt": truth_pt,
+        "truth_eta": truth_eta,
+        "truth_phi": truth_phi,
+    }
+
+
+def _resolution_features(sample: TrackCompositionSample) -> dict[str, np.ndarray]:
+    reco = _track_features(sample)
+    truth = _truth_features(sample)
+    p_resolution = np.divide(
+        reco["p"] - truth["truth_p"],
+        truth["truth_p"],
+        out=np.full_like(reco["p"], np.nan, dtype=float),
+        where=truth["truth_p"] != 0,
+    )
+    pt_resolution = np.divide(
+        reco["pt"] - truth["truth_pt"],
+        truth["truth_pt"],
+        out=np.full_like(reco["pt"], np.nan, dtype=float),
+        where=truth["truth_pt"] != 0,
+    )
+    return {
+        **reco,
+        **truth,
+        "p_resolution": p_resolution,
+        "pt_resolution": pt_resolution,
+        "matched_mask": sample.truth_mask
+        & np.isfinite(reco["p"])
+        & np.isfinite(reco["pt"])
+        & np.isfinite(truth["truth_p"])
+        & np.isfinite(truth["truth_pt"])
+        & (truth["truth_p"] > 0)
+        & (truth["truth_pt"] > 0),
+    }
+
+
+def _finite_range(values: np.ndarray, log: bool = False) -> tuple[float, float] | None:
+    finite = values[np.isfinite(values)]
+    if log:
+        finite = finite[finite > 0]
+    if len(finite) == 0:
+        return None
+    vmin = float(np.min(finite))
+    vmax = float(np.max(finite))
+    if not np.isfinite(vmin) or not np.isfinite(vmax):
+        return None
+    if vmin == vmax:
+        delta = abs(vmin) * 0.05 if vmin != 0 else 1.0
+        vmin -= delta
+        vmax += delta
+        if log and vmin <= 0:
+            vmin = max(vmax * 1e-3, 1e-6)
+    return vmin, vmax
+
+
+def _bins_from_values(
+    values: np.ndarray, n_bins: int = 50, log: bool = False
+) -> np.ndarray | int:
+    value_range = _finite_range(values, log=log)
+    if value_range is None:
+        return n_bins
+    vmin, vmax = value_range
+    if log:
+        return np.logspace(np.log10(max(vmin, 1e-12)), np.log10(vmax), n_bins)
+    return np.linspace(vmin, vmax, n_bins)
+
+
+def _profile_resolution(
+    x: np.ndarray, y: np.ndarray, bins: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    centers = 0.5 * (bins[:-1] + bins[1:])
+    mean = np.full_like(centers, np.nan, dtype=float)
+    std = np.full_like(centers, np.nan, dtype=float)
+    counts = np.zeros_like(centers, dtype=int)
+    indices = np.digitize(x, bins) - 1
+    for i in range(len(centers)):
+        values = y[indices == i]
+        values = values[np.isfinite(values)]
+        counts[i] = len(values)
+        if len(values) == 0:
+            continue
+        mean[i] = float(np.mean(values))
+        std[i] = float(np.std(values, ddof=0))
+    return centers, mean, std, counts
 
 
 def _prepare_matplotlib():
@@ -236,7 +370,9 @@ def _scale_figure(fig, scale: float = 1.3) -> None:
     fig.set_size_inches(width * scale, height * scale, forward=True)
 
 
-def plot_fake_truth_hitcount_distributions(sample: TrackCompositionSample, output_path: str | Path) -> Path:
+def plot_fake_truth_hitcount_distributions(
+    sample: TrackCompositionSample, output_path: str | Path
+) -> Path:
     plt = _prepare_matplotlib()
 
     bins_by_name = {
@@ -289,12 +425,16 @@ def plot_fake_truth_hitcount_distributions(sample: TrackCompositionSample, outpu
     return output_path
 
 
-def _hist2d(x: np.ndarray, y: np.ndarray, xbins: np.ndarray, ybins: np.ndarray) -> np.ndarray:
+def _hist2d(
+    x: np.ndarray, y: np.ndarray, xbins: np.ndarray, ybins: np.ndarray
+) -> np.ndarray:
     hist, _, _ = np.histogram2d(x, y, bins=[xbins, ybins])
     return hist
 
 
-def plot_fake_truth_pt_eta(sample: TrackCompositionSample, output_path: str | Path) -> Path:
+def plot_fake_truth_pt_eta(
+    sample: TrackCompositionSample, output_path: str | Path
+) -> Path:
     plt = _prepare_matplotlib()
     features = _track_features(sample)
 
@@ -327,7 +467,9 @@ def plot_fake_truth_pt_eta(sample: TrackCompositionSample, output_path: str | Pa
 
     fake_hist = _hist2d(fake_pt, fake_eta, pt_bins, eta_bins)
     truth_hist = _hist2d(truth_pt, truth_eta, pt_bins, eta_bins)
-    ratio = np.divide(fake_hist, truth_hist, out=np.full_like(fake_hist, np.nan), where=truth_hist > 0)
+    ratio = np.divide(
+        fake_hist, truth_hist, out=np.full_like(fake_hist, np.nan), where=truth_hist > 0
+    )
 
     fig, axes = plt.subplots(1, 3, figsize=(16, 5), constrained_layout=True)
     _scale_figure(fig)
@@ -351,7 +493,9 @@ def plot_fake_truth_pt_eta(sample: TrackCompositionSample, output_path: str | Pa
     return output_path
 
 
-def plot_fake_truth_kinematics_1d(sample: TrackCompositionSample, output_path: str | Path) -> Path:
+def plot_fake_truth_kinematics_1d(
+    sample: TrackCompositionSample, output_path: str | Path
+) -> Path:
     plt = _prepare_matplotlib()
     features = _track_features(sample)
 
@@ -367,7 +511,9 @@ def plot_fake_truth_kinematics_1d(sample: TrackCompositionSample, output_path: s
         ("ty", sample.ty, False, 50),
     ]
 
-    fig, axes = plt.subplots(len(hist_specs), 3, figsize=(18, 3.2 * len(hist_specs)), constrained_layout=True)
+    fig, axes = plt.subplots(
+        len(hist_specs), 3, figsize=(18, 3.2 * len(hist_specs)), constrained_layout=True
+    )
     _scale_figure(fig)
     for row, (label, values, logx, bins) in enumerate(hist_specs):
         fake_values = values[fake]
@@ -379,8 +525,10 @@ def plot_fake_truth_kinematics_1d(sample: TrackCompositionSample, output_path: s
             finite_fake = finite_fake[finite_fake > 0]
             finite_truth = finite_truth[finite_truth > 0]
             if len(finite_fake) or len(finite_truth):
-                combined = np.concatenate([finite_fake, finite_truth]) if len(finite_fake) and len(finite_truth) else (
-                    finite_fake if len(finite_fake) else finite_truth
+                combined = (
+                    np.concatenate([finite_fake, finite_truth])
+                    if len(finite_fake) and len(finite_truth)
+                    else (finite_fake if len(finite_fake) else finite_truth)
                 )
                 xmin = max(np.min(combined), 1e-6)
                 xmax = np.max(combined)
@@ -388,8 +536,10 @@ def plot_fake_truth_kinematics_1d(sample: TrackCompositionSample, output_path: s
             else:
                 bins_array = bins
         else:
-            combined = np.concatenate([finite_fake, finite_truth]) if len(finite_fake) and len(finite_truth) else (
-                finite_fake if len(finite_fake) else finite_truth
+            combined = (
+                np.concatenate([finite_fake, finite_truth])
+                if len(finite_fake) and len(finite_truth)
+                else (finite_fake if len(finite_fake) else finite_truth)
             )
             if len(combined):
                 bins_array = np.linspace(np.min(combined), np.max(combined), bins)
@@ -399,11 +549,20 @@ def plot_fake_truth_kinematics_1d(sample: TrackCompositionSample, output_path: s
         hist_fake, edges = np.histogram(finite_fake, bins=bins_array)
         hist_truth, _ = np.histogram(finite_truth, bins=edges)
         total = hist_fake + hist_truth
-        fake_rate = np.divide(hist_fake, total, out=np.zeros_like(hist_fake, dtype=float), where=total > 0)
+        fake_rate = np.divide(
+            hist_fake, total, out=np.zeros_like(hist_fake, dtype=float), where=total > 0
+        )
         centers = 0.5 * (edges[:-1] + edges[1:])
 
         ax_fake, ax_truth, ax_rate = axes[row]
-        ax_fake.hist(finite_fake, bins=edges, histtype="step", linewidth=2, label="fake", color="#C44E52")
+        ax_fake.hist(
+            finite_fake,
+            bins=edges,
+            histtype="step",
+            linewidth=2,
+            label="fake",
+            color="#C44E52",
+        )
         ax_fake.set_xlabel(label)
         ax_fake.set_ylabel("tracks")
         if logx:
@@ -412,7 +571,14 @@ def plot_fake_truth_kinematics_1d(sample: TrackCompositionSample, output_path: s
         ax_fake.legend(frameon=False)
         ax_fake.set_title("fake")
 
-        ax_truth.hist(finite_truth, bins=edges, histtype="step", linewidth=2, label="truth", color="#4C72B0")
+        ax_truth.hist(
+            finite_truth,
+            bins=edges,
+            histtype="step",
+            linewidth=2,
+            label="truth",
+            color="#4C72B0",
+        )
         ax_truth.set_xlabel(label)
         ax_truth.set_ylabel("tracks")
         if logx:
@@ -437,7 +603,9 @@ def plot_fake_truth_kinematics_1d(sample: TrackCompositionSample, output_path: s
     return output_path
 
 
-def plot_fake_truth_kinematics_2d(sample: TrackCompositionSample, output_path: str | Path) -> Path:
+def plot_fake_truth_kinematics_2d(
+    sample: TrackCompositionSample, output_path: str | Path
+) -> Path:
     plt = _prepare_matplotlib()
     features = _track_features(sample)
 
@@ -483,16 +651,38 @@ def plot_fake_truth_kinematics_2d(sample: TrackCompositionSample, output_path: s
             continue
 
         if logx:
-            xmin = max(np.min(np.concatenate([fake_x[fake_x > 0], truth_x[truth_x > 0]]) if len(fake_x) and len(truth_x) else (fake_x[fake_x > 0] if len(fake_x) else truth_x[truth_x > 0])), 1e-6)
-            xmax = np.max(np.concatenate([fake_x[fake_x > 0], truth_x[truth_x > 0]]) if len(fake_x) and len(truth_x) else (fake_x[fake_x > 0] if len(fake_x) else truth_x[truth_x > 0]))
+            xmin = max(
+                np.min(
+                    np.concatenate([fake_x[fake_x > 0], truth_x[truth_x > 0]])
+                    if len(fake_x) and len(truth_x)
+                    else (fake_x[fake_x > 0] if len(fake_x) else truth_x[truth_x > 0])
+                ),
+                1e-6,
+            )
+            xmax = np.max(
+                np.concatenate([fake_x[fake_x > 0], truth_x[truth_x > 0]])
+                if len(fake_x) and len(truth_x)
+                else (fake_x[fake_x > 0] if len(fake_x) else truth_x[truth_x > 0])
+            )
             xbins = np.logspace(np.log10(xmin), np.log10(xmax), 40)
         else:
             xmin, xmax = np.min(combined_x), np.max(combined_x)
             xbins = np.linspace(xmin, xmax, 40)
 
         if logy:
-            ymin = max(np.min(np.concatenate([fake_y[fake_y > 0], truth_y[truth_y > 0]]) if len(fake_y) and len(truth_y) else (fake_y[fake_y > 0] if len(fake_y) else truth_y[truth_y > 0])), 1e-6)
-            ymax = np.max(np.concatenate([fake_y[fake_y > 0], truth_y[truth_y > 0]]) if len(fake_y) and len(truth_y) else (fake_y[fake_y > 0] if len(fake_y) else truth_y[truth_y > 0]))
+            ymin = max(
+                np.min(
+                    np.concatenate([fake_y[fake_y > 0], truth_y[truth_y > 0]])
+                    if len(fake_y) and len(truth_y)
+                    else (fake_y[fake_y > 0] if len(fake_y) else truth_y[truth_y > 0])
+                ),
+                1e-6,
+            )
+            ymax = np.max(
+                np.concatenate([fake_y[fake_y > 0], truth_y[truth_y > 0]])
+                if len(fake_y) and len(truth_y)
+                else (fake_y[fake_y > 0] if len(fake_y) else truth_y[truth_y > 0])
+            )
             ybins = np.logspace(np.log10(ymin), np.log10(ymax), 40)
         else:
             ymin, ymax = np.min(combined_y), np.max(combined_y)
@@ -501,7 +691,12 @@ def plot_fake_truth_kinematics_2d(sample: TrackCompositionSample, output_path: s
         fake_hist = _hist2d(fake_x, fake_y, xbins, ybins)
         truth_hist = _hist2d(truth_x, truth_y, xbins, ybins)
         total_hist = fake_hist + truth_hist
-        fake_rate = np.divide(fake_hist, total_hist, out=np.full_like(fake_hist, np.nan), where=total_hist > 0)
+        fake_rate = np.divide(
+            fake_hist,
+            total_hist,
+            out=np.full_like(fake_hist, np.nan),
+            where=total_hist > 0,
+        )
 
         for col, (hist, title, cmap) in enumerate(
             [
@@ -528,6 +723,216 @@ def plot_fake_truth_kinematics_2d(sample: TrackCompositionSample, output_path: s
     return output_path
 
 
+def plot_momentum_resolution_1d(
+    sample: TrackCompositionSample, output_path: str | Path
+) -> Path:
+    plt = _prepare_matplotlib()
+    features = _resolution_features(sample)
+    matched = features["matched_mask"]
+
+    p_res = features["p_resolution"][matched]
+    pt_res = features["pt_resolution"][matched]
+    truth_p = features["truth_p"][matched]
+    truth_pt = features["truth_pt"][matched]
+
+    valid_p = np.isfinite(p_res) & np.isfinite(truth_p) & (truth_p > 0)
+    valid_pt = np.isfinite(pt_res) & np.isfinite(truth_pt) & (truth_pt > 0)
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10), constrained_layout=True)
+    _scale_figure(fig)
+
+    panels = [
+        (
+            axes[0, 0],
+            p_res[valid_p],
+            "(p(reco) - p(truth)) / p(truth)",
+            "Momentum resolution",
+        ),
+        (
+            axes[0, 1],
+            pt_res[valid_pt],
+            "(pT(reco) - pT(truth)) / pT(truth)",
+            "pT resolution",
+        ),
+    ]
+    for ax, values, xlabel, title in panels:
+        values = values[np.isfinite(values)]
+        if len(values) == 0:
+            ax.text(
+                0.5,
+                0.5,
+                "no truth-matched tracks",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+            )
+            ax.set_title(title)
+            continue
+        central = (
+            values[np.abs(values) <= np.nanpercentile(np.abs(values), 99.5)]
+            if len(values) > 10
+            else values
+        )
+        bins = _bins_from_values(central, n_bins=70, log=False)
+        ax.hist(values, bins=bins, histtype="stepfilled", alpha=0.35, color="#4C72B0")
+        ax.axvline(0, color="black", linestyle="--", linewidth=1)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel("truth-matched tracks")
+        ax.set_title(f"{title}: mean={np.mean(values):.3g}, std={np.std(values):.3g}")
+        ax.grid(True, alpha=0.2)
+
+    profile_specs = [
+        (axes[1, 0], truth_p[valid_p], p_res[valid_p], "truth p [MeV]", "p resolution"),
+        (
+            axes[1, 1],
+            truth_pt[valid_pt],
+            pt_res[valid_pt],
+            "truth pT [MeV]",
+            "pT resolution",
+        ),
+    ]
+    for ax, xvals, yvals, xlabel, ylabel in profile_specs:
+        if len(xvals) == 0:
+            ax.text(
+                0.5,
+                0.5,
+                "no truth-matched tracks",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+            )
+            continue
+        bins = _bins_from_values(xvals, n_bins=18, log=True)
+        if isinstance(bins, int):
+            ax.text(
+                0.5,
+                0.5,
+                "no finite truth values",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+            )
+            continue
+        centers, mean, std, counts = _profile_resolution(xvals, yvals, bins)
+        nonempty = counts > 0
+        ax.errorbar(
+            centers[nonempty],
+            mean[nonempty],
+            yerr=std[nonempty],
+            fmt="o",
+            color="#2F4B7C",
+            ecolor="#2F4B7C",
+            capsize=3,
+            label="mean ± stddev",
+        )
+        ax.axhline(0, color="black", linestyle="--", linewidth=1)
+        ax.set_xscale("log")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(f"{ylabel} profile vs {xlabel}")
+        ax.grid(True, alpha=0.2)
+        ax.legend(frameon=False)
+
+    output_path = Path(output_path)
+    fig.suptitle("Truth-matched momentum and pT resolution summary")
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+    return output_path
+
+
+def plot_momentum_resolution_2d(
+    sample: TrackCompositionSample, output_path: str | Path
+) -> Path:
+    plt = _prepare_matplotlib()
+    features = _resolution_features(sample)
+    matched = features["matched_mask"]
+
+    plot_specs = [
+        (
+            "truth p [MeV]",
+            features["truth_p"],
+            "p resolution",
+            features["p_resolution"],
+            True,
+        ),
+        (
+            "truth pT [MeV]",
+            features["truth_pt"],
+            "pT resolution",
+            features["pt_resolution"],
+            True,
+        ),
+        (
+            "truth eta",
+            features["truth_eta"],
+            "p resolution",
+            features["p_resolution"],
+            False,
+        ),
+        (
+            "truth eta",
+            features["truth_eta"],
+            "pT resolution",
+            features["pt_resolution"],
+            False,
+        ),
+    ]
+
+    fig, axes = plt.subplots(2, 2, figsize=(15, 11), constrained_layout=True)
+    _scale_figure(fig)
+    for ax, (xlabel, xall, ylabel, yall, logx) in zip(axes.flat, plot_specs):
+        xvals = xall[matched]
+        yvals = yall[matched]
+        finite = np.isfinite(xvals) & np.isfinite(yvals)
+        if logx:
+            finite &= xvals > 0
+        xvals = xvals[finite]
+        yvals = yvals[finite]
+        if len(xvals) == 0:
+            ax.text(
+                0.5,
+                0.5,
+                "no truth-matched tracks",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+            )
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel(ylabel)
+            continue
+        xbins = _bins_from_values(xvals, n_bins=45, log=logx)
+        ycentral = (
+            yvals[np.abs(yvals) <= np.nanpercentile(np.abs(yvals), 99.5)]
+            if len(yvals) > 10
+            else yvals
+        )
+        ybins = _bins_from_values(ycentral, n_bins=55, log=False)
+        if isinstance(xbins, int) or isinstance(ybins, int):
+            ax.text(
+                0.5,
+                0.5,
+                "insufficient finite values",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+            )
+            continue
+        hist = ax.hist2d(xvals, yvals, bins=[xbins, ybins], cmap="viridis")
+        ax.axhline(0, color="white", linestyle="--", linewidth=1)
+        if logx:
+            ax.set_xscale("log")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(f"{ylabel} vs {xlabel}")
+        fig.colorbar(hist[3], ax=ax, label="truth-matched tracks")
+
+    output_path = Path(output_path)
+    fig.suptitle("Momentum resolution as a function of truth properties")
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+    return output_path
+
+
 def plot_ghost_rate(sample: TrackCompositionSample, output_path: str | Path) -> Path:
     plt = _prepare_matplotlib()
     features = _track_features(sample)
@@ -544,7 +949,9 @@ def plot_ghost_rate(sample: TrackCompositionSample, output_path: str | Path) -> 
         ("chi2/ndof", features["chi2ndof"], False),
     ]
 
-    fig, axes = plt.subplots(len(variables), 3, figsize=(16, 3.2 * len(variables)), constrained_layout=True)
+    fig, axes = plt.subplots(
+        len(variables), 3, figsize=(16, 3.2 * len(variables)), constrained_layout=True
+    )
     _scale_figure(fig)
 
     for row, (label, values, logx) in enumerate(variables):
@@ -557,8 +964,10 @@ def plot_ghost_rate(sample: TrackCompositionSample, output_path: str | Path) -> 
             finite_fake = finite_fake[finite_fake > 0]
             finite_truth = finite_truth[finite_truth > 0]
             if len(finite_fake) or len(finite_truth):
-                combined = np.concatenate([finite_fake, finite_truth]) if len(finite_fake) and len(finite_truth) else (
-                    finite_fake if len(finite_fake) else finite_truth
+                combined = (
+                    np.concatenate([finite_fake, finite_truth])
+                    if len(finite_fake) and len(finite_truth)
+                    else (finite_fake if len(finite_fake) else finite_truth)
                 )
                 xmin = max(np.min(combined), 1e-6)
                 xmax = np.max(combined)
@@ -566,8 +975,10 @@ def plot_ghost_rate(sample: TrackCompositionSample, output_path: str | Path) -> 
             else:
                 bins = 50
         else:
-            combined = np.concatenate([finite_fake, finite_truth]) if len(finite_fake) and len(finite_truth) else (
-                finite_fake if len(finite_fake) else finite_truth
+            combined = (
+                np.concatenate([finite_fake, finite_truth])
+                if len(finite_fake) and len(finite_truth)
+                else (finite_fake if len(finite_fake) else finite_truth)
             )
             if len(combined):
                 bins = np.linspace(np.min(combined), np.max(combined), 50)
@@ -577,7 +988,9 @@ def plot_ghost_rate(sample: TrackCompositionSample, output_path: str | Path) -> 
         hist_fake, edges = np.histogram(finite_fake, bins=bins)
         hist_truth, _ = np.histogram(finite_truth, bins=edges)
         total = hist_fake + hist_truth
-        ghost_rate = np.divide(hist_fake, total, out=np.zeros_like(hist_fake, dtype=float), where=total > 0)
+        ghost_rate = np.divide(
+            hist_fake, total, out=np.zeros_like(hist_fake, dtype=float), where=total > 0
+        )
         centers = 0.5 * (edges[:-1] + edges[1:])
 
         ax_total, ax_fake_only, ax_rate = axes[row]
@@ -604,8 +1017,22 @@ def plot_ghost_rate(sample: TrackCompositionSample, output_path: str | Path) -> 
             ax_total.set_xscale("log")
         ax_total.legend(frameon=False)
 
-        ax_fake_only.hist(finite_fake, bins=edges, histtype="step", linewidth=2, color="#C44E52", label="fake")
-        ax_fake_only.hist(finite_truth, bins=edges, histtype="step", linewidth=2, color="#4C72B0", label="truth")
+        ax_fake_only.hist(
+            finite_fake,
+            bins=edges,
+            histtype="step",
+            linewidth=2,
+            color="#C44E52",
+            label="fake",
+        )
+        ax_fake_only.hist(
+            finite_truth,
+            bins=edges,
+            histtype="step",
+            linewidth=2,
+            color="#4C72B0",
+            label="truth",
+        )
         ax_fake_only.set_ylabel("tracks")
         ax_fake_only.set_title(f"{label}: fake and truth")
         ax_fake_only.grid(True, alpha=0.2)
@@ -629,7 +1056,9 @@ def plot_ghost_rate(sample: TrackCompositionSample, output_path: str | Path) -> 
     return output_path
 
 
-def plot_event_fake_rate_vs_pvs(sample: EventCompositionSample | EventFakePvSample, output_path: str | Path) -> Path:
+def plot_event_fake_rate_vs_pvs(
+    sample: EventCompositionSample | EventFakePvSample, output_path: str | Path
+) -> Path:
     plt = _prepare_matplotlib()
 
     pv = sample.pv_count
@@ -649,7 +1078,12 @@ def plot_event_fake_rate_vs_pvs(sample: EventCompositionSample | EventFakePvSamp
     axes[0].set_title("Fakes vs PVs")
     axes[0].grid(True, alpha=0.2)
 
-    hist = axes[1].hist2d(pv[valid_rate_mask], fake_rate[valid_rate_mask], bins=[pv_bins, rate_bins], cmap="viridis")
+    hist = axes[1].hist2d(
+        pv[valid_rate_mask],
+        fake_rate[valid_rate_mask],
+        bins=[pv_bins, rate_bins],
+        cmap="viridis",
+    )
     axes[1].set_xlabel("# PVs")
     axes[1].set_ylabel("fake / total")
     axes[1].set_ylim(0, 1)
@@ -734,7 +1168,9 @@ def plot_event_fake_rate_vs_pvs(sample: EventCompositionSample | EventFakePvSamp
         ax2_hist.set_ylabel("norm. events")
         ax2_hist.set_title("Underlying PV distribution")
         ax2_hist.grid(True, alpha=0.2)
-        fig2_path = Path(output_path).with_name(f"{Path(output_path).stem}_profile{Path(output_path).suffix}")
+        fig2_path = Path(output_path).with_name(
+            f"{Path(output_path).stem}_profile{Path(output_path).suffix}"
+        )
         fig2.savefig(fig2_path, dpi=150)
         plt.close(fig2)
 
@@ -745,7 +1181,9 @@ def plot_event_fake_rate_vs_pvs(sample: EventCompositionSample | EventFakePvSamp
     return output_path
 
 
-def plot_event_tracks_vs_pvs(sample: EventCompositionSample | EventFakePvSample, output_path: str | Path) -> Path:
+def plot_event_tracks_vs_pvs(
+    sample: EventCompositionSample | EventFakePvSample, output_path: str | Path
+) -> Path:
     plt = _prepare_matplotlib()
 
     pv = sample.pv_count
@@ -766,7 +1204,9 @@ def plot_event_tracks_vs_pvs(sample: EventCompositionSample | EventFakePvSample,
     return output_path
 
 
-def plot_fake_truth_segment_slopes(sample: TrackCompositionSample, output_path: str | Path) -> Path:
+def plot_fake_truth_segment_slopes(
+    sample: TrackCompositionSample, output_path: str | Path
+) -> Path:
     plt = _prepare_matplotlib()
 
     fake = sample.fake_mask
@@ -788,16 +1228,34 @@ def plot_fake_truth_segment_slopes(sample: TrackCompositionSample, output_path: 
         truth_values = values[truth & segment_mask]
         finite_fake = fake_values[np.isfinite(fake_values)]
         finite_truth = truth_values[np.isfinite(truth_values)]
-        combined = np.concatenate([finite_fake, finite_truth]) if len(finite_fake) and len(finite_truth) else (
-            finite_fake if len(finite_fake) else finite_truth
+        combined = (
+            np.concatenate([finite_fake, finite_truth])
+            if len(finite_fake) and len(finite_truth)
+            else (finite_fake if len(finite_fake) else finite_truth)
         )
         if len(combined) == 0:
             ax.set_title(title)
-            ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=ax.transAxes)
+            ax.text(
+                0.5, 0.5, "no data", ha="center", va="center", transform=ax.transAxes
+            )
             continue
         bins = np.linspace(np.min(combined), np.max(combined), 50)
-        ax.hist(finite_fake, bins=bins, histtype="step", linewidth=2, label="fake", color="#C44E52")
-        ax.hist(finite_truth, bins=bins, histtype="step", linewidth=2, label="truth", color="#4C72B0")
+        ax.hist(
+            finite_fake,
+            bins=bins,
+            histtype="step",
+            linewidth=2,
+            label="fake",
+            color="#C44E52",
+        )
+        ax.hist(
+            finite_truth,
+            bins=bins,
+            histtype="step",
+            linewidth=2,
+            label="truth",
+            color="#4C72B0",
+        )
         ax.set_title(title)
         ax.set_xlabel("slope")
         ax.set_ylabel("tracks")

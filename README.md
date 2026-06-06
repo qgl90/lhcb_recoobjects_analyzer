@@ -7,17 +7,15 @@ It reads a `.root` file with `uproot`, turns the data into lightweight Python ob
 ## What’s inside
 
 - `main_runner.py` — command-line entry point
+- `chi2_cut_study.py` — dedicated `chi2/ndof` cut study
 - `src/analysis/root_loader.py` — ROOT reading and event assembly
 - `src/analysis/composition.py` — fake-vs-truth and event-level studies
 - `src/analysis/fake_tracks.py` — fake-track inspection, fits, and plotting
+- `src/analysis/chi2_study.py` — `chi2/ndof` cut efficiency and kinematic impact study
 - `src/analysis/models.py` — shared dataclasses for tracks, hits, events, and PVs
-- `src/analysis/training_samples.py` — feature extraction and Parquet writing for fake-vs-truth training tables
-- `prepare_training_samples_fakes_vs_truth.py` — CLI runner for ghost-suppression training samples
 - `src/analysis/prompts.md` — prompt notes for analysis workflows
 
 ## Install
-
-The project uses a small Python stack:
 
 ```bash
 python3 -m pip install -r requirements.txt
@@ -43,29 +41,23 @@ Full fake-vs-truth composition study:
 python3 main_runner.py --composition --limit 100
 ```
 
-Prepare a track-level Parquet file for a ghost-suppression neural network:
+`chi2/ndof` cut study:
 
 ```bash
-python3 prepare_training_samples_fakes_vs_truth.py --root jan2026_minbias_1p0E34_1000evts.root --output training_samples_fakes_vs_truth.parquet --limit 100
-```
-
-Select only fast, track-level feature groups when you do not need hit residuals or segment fits:
-
-```bash
-python3 prepare_training_samples_fakes_vs_truth.py --features event,state,kinematics,hits --balance
+python3 chi2_cut_study.py --cuts 8,7,6,5,4,3 --limit 100
 ```
 
 ## Outputs
 
-The runner can generate:
+The scripts can generate:
 
 - 3D hit clouds for fake tracks
 - fake-track kinematic distributions
 - fake-vs-truth histograms and 2D maps
 - ghost-rate plots
-- per-event fake rate versus number of PVs
-- per-event track multiplicity versus number of PVs
-- Parquet fake-vs-truth track tables for neural-network training
+- event fake rate versus number of PVs
+- event track multiplicity versus number of PVs
+- `chi2/ndof` efficiency curves and kinematic-shape comparisons
 
 ## Analysis flow
 
@@ -74,7 +66,7 @@ The runner can generate:
 3. Inspect `tx`, `ty`, `qop`, `p`, `pt`, `eta`, `phi`, and `chi2/ndof`
 4. Compare fake and truth distributions
 5. Study event-level fake rate versus PV multiplicity
-6. Export configurable feature groups (`event`, `state`, `kinematics`, `hits`, `hit_truth`, `segments`, `mc`) into a Parquet table with `label=1` for truth tracks and `label=0` for fake tracks
+6. Scan `chi2/ndof` thresholds and see how fake/truth kinematics respond
 
 ## Validation
 
