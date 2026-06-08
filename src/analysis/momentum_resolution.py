@@ -40,7 +40,9 @@ def resolution_frame_from_sample(sample: TrackCompositionSample) -> pd.DataFrame
             "truth_eta": features["truth_eta"],
             "truth_phi": features["truth_phi"],
             "delta_p_over_p": features["p_resolution"],
+            "delta_p_over_p_abs": np.abs(features["p_resolution"]),
             "delta_pt_over_pt": features["pt_resolution"],
+            "delta_pt_over_pt_abs": np.abs(features["pt_resolution"]),
         }
     )
     return frame
@@ -88,6 +90,8 @@ def resolution_frame_from_parquet(path: str | Path, limit: int | None = None) ->
             out=np.full(len(frame), np.nan, dtype=float),
             where=frame["truth_p"].to_numpy() != 0,
         )
+    if "delta_p_over_p_abs" not in frame.columns:
+        frame["delta_p_over_p_abs"] = np.abs(frame["delta_p_over_p"].to_numpy(dtype=float))
     if "delta_pt_over_pt" not in frame.columns:
         frame["delta_pt_over_pt"] = np.divide(
             frame["reco_pt"] - frame["truth_pt"],
@@ -95,6 +99,8 @@ def resolution_frame_from_parquet(path: str | Path, limit: int | None = None) ->
             out=np.full(len(frame), np.nan, dtype=float),
             where=frame["truth_pt"].to_numpy() != 0,
         )
+    if "delta_pt_over_pt_abs" not in frame.columns:
+        frame["delta_pt_over_pt_abs"] = np.abs(frame["delta_pt_over_pt"].to_numpy(dtype=float))
     if "label" not in frame.columns:
         if "mc_truth" in frame.columns:
             frame["label"] = (frame["mc_truth"] == 1).astype(np.int8)

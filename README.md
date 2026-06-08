@@ -59,7 +59,7 @@ streamlit run momentum_resolution_dashboard.py
 ```
 
 The dashboard lets you choose the binning variable, restrict its range, clip the residual window, and inspect the Gaussian fit for any individual bin.
-For example, you can set `truth_eta` and restrict the binning window to `eta in [2, 5]`, then inspect the Gaussian-fit residual distribution in each bin.
+It now has separate `p-resolution` and `p-bias` tabs. For example, you can set `truth_eta` and restrict the binning window to `eta in [2, 5]`, then inspect the Gaussian-fit residual distribution in each bin.
 
 Static momentum-resolution scatter:
 
