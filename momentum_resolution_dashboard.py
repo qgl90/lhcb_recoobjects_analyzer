@@ -10,6 +10,7 @@ from src.analysis.momentum_resolution import (
     selected_bin_histogram,
     select_truth_frame,
 )
+from src.analysis.composition import _prepare_matplotlib as _prepare_lhcb_matplotlib
 
 
 def _default_range(values: np.ndarray, *, positive_only: bool = False) -> tuple[float, float]:
@@ -33,10 +34,8 @@ def _render_analysis_tab(
     plt,
     frame,
     *,
-    tab_title: str,
     response_var: str,
     response_label: str,
-    profile_stat: str,
     chi2_max: float,
     bin_var: str,
     n_bins: int,
@@ -46,7 +45,7 @@ def _render_analysis_tab(
 ) -> None:
     truth_frame = select_truth_frame(frame, chi2_max=chi2_max)
     if truth_frame.empty:
-        st.warning(f"No truth-matched tracks passed the current selection for {tab_title}.")
+        st.warning("No truth-matched tracks passed the current selection.")
         return
 
     positive_only = bin_var in {"truth_p", "truth_pt", "reco_p", "reco_pt"}
@@ -57,28 +56,28 @@ def _render_analysis_tab(
     if response_var.endswith("_abs"):
         response_default_min = max(0.0, response_default_min)
 
-    with st.expander(f"{tab_title} controls", expanded=True):
+    with st.expander("Momentum-resolution controls", expanded=True):
         c1, c2, c3 = st.columns(3)
         with c1:
-            bin_min = st.number_input(f"{tab_title}: bin min", value=float(bin_default_min), format="%.6g", key=f"{tab_title}_bin_min")
+            bin_min = st.number_input("Bin min", value=float(bin_default_min), format="%.6g", key="momentum_bin_min")
         with c2:
-            bin_max = st.number_input(f"{tab_title}: bin max", value=float(bin_default_max), format="%.6g", key=f"{tab_title}_bin_max")
+            bin_max = st.number_input("Bin max", value=float(bin_default_max), format="%.6g", key="momentum_bin_max")
         with c3:
             response_max = st.number_input(
-                f"{tab_title}: residual max", value=float(response_default_max), format="%.6g", key=f"{tab_title}_res_max"
+                "Residual max", value=float(response_default_max), format="%.6g", key="momentum_res_max"
             )
         response_min_default = float(response_default_min)
         if response_var.endswith("_abs"):
             response_min_default = 0.0
         response_min = st.number_input(
-            f"{tab_title}: residual min",
+            "Residual min",
             value=response_min_default,
             format="%.6g",
-            key=f"{tab_title}_res_min",
+            key="momentum_res_min",
         )
         use_log_x = positive_only
         show_points = st.checkbox(
-            f"{tab_title}: show all scatter points", value=show_all_points, key=f"{tab_title}_show_points"
+            "Show all scatter points", value=show_all_points, key="momentum_show_points"
         )
 
     if positive_only and bin_min <= 0:
@@ -113,7 +112,7 @@ def _render_analysis_tab(
         )
     default_index = int(summary["count"].to_numpy(dtype=int).argmax())
     selected_bin_label = st.selectbox(
-        f"{tab_title}: inspect bin", selected_bin_options, index=default_index, key=f"{tab_title}_bin"
+        "Inspect bin", selected_bin_options, index=default_index, key="momentum_bin"
     )
     selected_bin_index = selected_bin_options.index(selected_bin_label)
     bin_details = selected_bin_histogram(
@@ -133,7 +132,7 @@ def _render_analysis_tab(
     left, right = st.columns([1.4, 1.0])
 
     with left:
-        st.subheader("Scatter + binned profile")
+        st.subheader("Bias and resolution together")
         x = selected_frame[bin_var].to_numpy(dtype=float)
         y = selected_frame[response_var].to_numpy(dtype=float)
         finite = np.isfinite(x) & np.isfinite(y)
@@ -143,32 +142,50 @@ def _render_analysis_tab(
             positive = x > 0
             x = x[positive]
             y = y[positive]
-        fig, ax = plt.subplots(figsize=(10, 7), constrained_layout=True)
+        fig, (ax_top, ax_bottom) = plt.subplots(2, 1, figsize=(10, 10), sharex=True, constrained_layout=True)
         if show_points:
-            ax.scatter(x, y, s=4, alpha=0.08, color="#7F7F7F", edgecolors="none")
+            ax_top.scatter(x, y, s=4, alpha=0.08, color="#7F7F7F", edgecolors="none")
 
         centers = summary["bin_center"].to_numpy(dtype=float)
-        profile_values = summary[profile_stat].to_numpy(dtype=float)
+        mean_values = summary["fit_mu"].to_numpy(dtype=float)
+        sigma_values = summary["fit_sigma"].to_numpy(dtype=float)
         valid = summary["count"].to_numpy(dtype=int) > 0
-        ax.plot(centers[valid], profile_values[valid], "o-", color="#2F4B7C", linewidth=2, label=profile_stat)
+        ax_top.errorbar(
+            centers[valid],
+            mean_values[valid],
+            yerr=sigma_values[valid],
+            fmt="o-",
+            color="#2F4B7C",
+            ecolor="#C44E52",
+            elinewidth=1.5,
+            capsize=2,
+            linewidth=2,
+            label="bias ± resolution",
+        )
+        ax_bottom.plot(centers[valid], mean_values[valid], "o-", color="#2F4B7C", linewidth=2, label="p-bias [%]")
+        ax_bottom.plot(centers[valid], sigma_values[valid], "o-", color="#C44E52", linewidth=2, label="p-resolution [%]")
 
         if positive_only:
-            ax.set_xscale("log")
-        ax.axhline(0, color="black", linestyle="--", linewidth=1)
-        ax.set_xlabel(bin_var)
-        ax.set_ylabel(response_label)
-        ax.set_title(f"{tab_title}: {response_label} vs {bin_var}")
-        ax.grid(True, alpha=0.2)
-        ax.legend(frameon=False)
+            ax_top.set_xscale("log")
+            ax_bottom.set_xscale("log")
+        ax_top.axhline(0, color="black", linestyle="--", linewidth=1)
+        ax_bottom.axhline(0, color="black", linestyle="--", linewidth=1)
+        ax_top.set_ylabel("Δp / p [%]")
+        ax_bottom.set_xlabel(bin_var)
+        ax_top.set_title(f"Momentum bias and resolution vs {bin_var}")
+        ax_top.grid(True, alpha=0.2)
+        ax_bottom.grid(True, alpha=0.2)
+        ax_top.legend(frameon=False)
+        ax_bottom.legend(frameon=False)
         st.pyplot(fig, clear_figure=True)
 
     with right:
         st.subheader("Bin statistics")
         st.dataframe(summary, use_container_width=True)
         st.download_button(
-            f"Download {tab_title} summary CSV",
+            "Download momentum summary CSV",
             summary.to_csv(index=False).encode(),
-            file_name=f"momentum_resolution_{tab_title}.csv",
+            file_name="momentum_resolution_summary.csv",
             mime="text/csv",
         )
 
@@ -177,6 +194,8 @@ def _render_analysis_tab(
         bin_row = bin_details["bin_row"]
         fit_mu = float(bin_details["fit_mu"])
         fit_sigma = float(bin_details["fit_sigma"])
+        fit_mu_display = fit_mu
+        fit_sigma_display = fit_sigma
 
         fig2, ax2 = plt.subplots(figsize=(8, 4.5), constrained_layout=True)
         if len(values):
@@ -187,7 +206,16 @@ def _render_analysis_tab(
                 xs = np.linspace(response_min, response_max, 400)
                 hist_area = len(values) * (response_max - response_min) / 50
                 pdf = hist_area * (1.0 / (fit_sigma * np.sqrt(2.0 * np.pi))) * np.exp(-0.5 * ((xs - fit_mu) / fit_sigma) ** 2)
-                ax2.plot(xs, pdf, color="#C44E52", linewidth=2, label=f"Gaussian fit μ={fit_mu:.3g}, σ={fit_sigma:.3g}")
+                ax2.plot(
+                    xs,
+                    pdf,
+                    color="#C44E52",
+                    linewidth=2,
+                    label=(
+                        f"Gaussian fit μ={fit_mu_display:.3g}, "
+                        f"σ={fit_sigma_display:.3g} %"
+                    ),
+                )
             ax2.axvline(0, color="black", linestyle="--", linewidth=1)
             ax2.set_title(f"Bin [{low:.4g}, {high:.4g}) with {len(values)} tracks")
             ax2.legend(frameon=False)
@@ -199,6 +227,11 @@ def _render_analysis_tab(
         st.pyplot(fig2, clear_figure=True)
 
         st.subheader("Fit summary")
+        metric_columns = st.columns(2)
+        with metric_columns[0]:
+            st.metric("p-bias", f"{fit_mu_display:.4g} %")
+        with metric_columns[1]:
+            st.metric("p-resolution", f"{fit_sigma_display:.4g} %")
         st.write(
             {
                 "bin_range": [float(bin_row["bin_low"]), float(bin_row["bin_high"])],
@@ -207,6 +240,8 @@ def _render_analysis_tab(
                 "std": float(bin_row["std"]),
                 "fit_mu": fit_mu,
                 "fit_sigma": fit_sigma,
+                "fit_mu_display": fit_mu_display,
+                "fit_sigma_display": fit_sigma_display,
             }
         )
 
@@ -218,7 +253,7 @@ def main() -> None:
         raise RuntimeError(
             "streamlit is required for the dashboard; install it with `python3 -m pip install streamlit`"
         ) from exc
-    import matplotlib.pyplot as plt
+    plt = _prepare_lhcb_matplotlib()
 
     st.set_page_config(page_title="Momentum resolution dashboard", layout="wide")
     st.title("Momentum resolution dashboard")
@@ -249,43 +284,25 @@ def main() -> None:
         st.error(f"Failed to load input: {exc}")
         return
 
+    frame = frame.copy()
+    frame["delta_p_over_p_percent"] = 100.0 * frame["delta_p_over_p"]
+
     if select_truth_frame(frame, chi2_max=chi2_max).empty:
         st.warning("No truth-matched tracks passed the current selection.")
         return
-
-    tabs = st.tabs(["p-resolution", "p-bias"])
-    with tabs[0]:
-        _render_analysis_tab(
-            st,
-            plt,
-            frame,
-            tab_title="p-resolution",
-            response_var="delta_p_over_p",
-            response_label="Δp / p",
-            profile_stat="fit_sigma",
-            chi2_max=chi2_max,
-            bin_var=bin_var,
-            n_bins=n_bins,
-            fit_mode=fit_mode,
-            show_all_points=show_all_points,
-            selected_limit=selected_limit,
-        )
-    with tabs[1]:
-        _render_analysis_tab(
-            st,
-            plt,
-            frame,
-            tab_title="p-bias",
-            response_var="delta_p_over_p",
-            response_label="Δp / p",
-            profile_stat="fit_mu",
-            chi2_max=chi2_max,
-            bin_var=bin_var,
-            n_bins=n_bins,
-            fit_mode=fit_mode,
-            show_all_points=show_all_points,
-            selected_limit=selected_limit,
-        )
+    _render_analysis_tab(
+        st,
+        plt,
+        frame,
+        response_var="delta_p_over_p_percent",
+        response_label="Δp / p [%]",
+        chi2_max=chi2_max,
+        bin_var=bin_var,
+        n_bins=n_bins,
+        fit_mode=fit_mode,
+        show_all_points=show_all_points,
+        selected_limit=selected_limit,
+    )
 
 
 if __name__ == "__main__":
