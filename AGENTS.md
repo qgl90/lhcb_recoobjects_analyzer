@@ -21,6 +21,9 @@ This repository analyzes LHCb-style reconstructed-track ROOT ntuples and focuses
 - Use `mplhep.style.use("LHCb2")` for plots.
 - Keep plots readable: larger figures, smaller markers, and explicit labels.
 - Prefer `truth_p` / `delta_p_over_p` as the default momentum-resolution axes.
+- Always keep documentation current with a clear "how to run" section for full-statistics studies and any new analysis entrypoint.
+- When adding or changing a study, update the README or a dedicated `docs/*.md` file with the exact full-statistics command and any key flags.
+- Prefer documenting the recommended command for the full sample first, then show shorter smoke-test or limit-based examples second.
 
 ## Common commands
 

@@ -22,3 +22,6 @@ Use these prompts when you want an LLM to help with ROOT-based analysis of recon
 
 > Build a compact feature table for each track using only fields available from the ROOT file. Include truth label, first-state kinematics, track quality, hit counts per detector, ancestor depth, and optional PV associations. Keep the output ready for pandas/CSV/Parquet so I can train a classifier or make diagnostic plots later.
 
+## 6) Documentation-first prompt
+
+> When you add a new study, script, or dashboard, update the repository documentation at the same time. Include a clear "how to run" section with the full-statistics command first, then any shorter smoke-test or limit-based variant. Keep the README and any study-specific docs in sync with the actual CLI flags and default outputs.

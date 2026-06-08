@@ -22,7 +22,9 @@ It reads a `.root` file with `uproot`, turns the data into lightweight Python ob
 python3 -m pip install -r requirements.txt
 ```
 
-## Run
+## How to run
+
+For every study, the documentation below shows the recommended full-statistics command first, followed by shorter smoke-test variants where useful.
 
 Quick fake-track pass on a ROOT file:
 
@@ -88,3 +90,11 @@ The scripts can generate:
 ## Validation
 
 The repository includes a minimal push-time check in GitHub Actions that compiles the Python sources and runs a small import smoke test.
+
+## Documentation rule
+
+Whenever you add a new study or script, keep the README and the relevant `docs/*.md` page updated with:
+
+- the full-statistics command to run it on the complete sample
+- the main optional flags users are likely to change
+- a shorter smoke-test command if the full run is expensive
