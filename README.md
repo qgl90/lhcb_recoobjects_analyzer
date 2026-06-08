@@ -8,6 +8,7 @@ It reads a `.root` file with `uproot`, turns the data into lightweight Python ob
 
 - `main_runner.py` — command-line entry point
 - `chi2_cut_study.py` — dedicated `chi2/ndof` cut study
+- `momentum_resolution_dashboard.py` — interactive momentum-resolution dashboard
 - `src/analysis/root_loader.py` — ROOT reading and event assembly
 - `src/analysis/composition.py` — fake-vs-truth and event-level studies
 - `src/analysis/fake_tracks.py` — fake-track inspection, fits, and plotting
@@ -49,6 +50,18 @@ python3 chi2_cut_study.py --cuts 8,7,6,5,4,3 --limit 100
 
 That study now also produces pass-fraction panels showing `fake(cut) / fake(total)` and `truth(cut) / truth(total)` versus `p`, `pT`, `eta`, and `phi`.
 
+Interactive momentum-resolution dashboard:
+
+```bash
+streamlit run momentum_resolution_dashboard.py
+```
+
+Static momentum-resolution scatter:
+
+```bash
+python3 main_runner.py --composition --limit 1000
+```
+
 ## Outputs
 
 The scripts can generate:
@@ -61,6 +74,7 @@ The scripts can generate:
 - event track multiplicity versus number of PVs
 - `chi2/ndof` efficiency curves and kinematic-shape comparisons
 - `chi2/ndof` pass-fraction curves versus `p`, `pT`, `eta`, and `phi` for fake and signal-truth tracks
+- momentum-resolution scatter for truth-matched tracks
 
 ## Analysis flow
 

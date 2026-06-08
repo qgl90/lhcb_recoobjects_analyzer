@@ -18,6 +18,7 @@ from src.analysis.composition import (
     plot_fake_truth_pt_eta,
     plot_fake_truth_segment_slopes,
 )
+from src.analysis.momentum_resolution import plot_momentum_resolution_scatter
 from src.analysis.fake_tracks import (
     fake_tracks,
     plot_fake_track_distributions,
@@ -82,6 +83,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--momres-2d-output", type=Path, default=Path("momentum_resolution_2d.png")
+    )
+    parser.add_argument(
+        "--momres-scatter-output",
+        type=Path,
+        default=Path("momentum_resolution_scatter.png"),
     )
     parser.add_argument(
         "--comp-pteta-output", type=Path, default=Path("fake_truth_pt_eta.png")
@@ -186,6 +192,9 @@ def main() -> None:
         momres_2d_output = plot_momentum_resolution_2d(
             composition_sample, args.momres_2d_output
         )
+        momres_scatter_output = plot_momentum_resolution_scatter(
+            composition_sample, args.momres_scatter_output
+        )
         event_rate_output = plot_event_fake_rate_vs_pvs(
             event_sample, args.event_rate_output
         )
@@ -202,6 +211,7 @@ def main() -> None:
         print(f"Saved ghost-rate plot to {ghost_output}")
         print(f"Saved momentum-resolution summary to {momres_1d_output}")
         print(f"Saved momentum-resolution truth-property checks to {momres_2d_output}")
+        print(f"Saved momentum-resolution scatter to {momres_scatter_output}")
         print(f"Saved event fake-rate vs PVs to {event_rate_output}")
         print(f"Saved event tracks vs PVs to {event_tracks_output}")
         print(f"Saved fake/truth pT-eta comparison to {comp_pteta_output}")

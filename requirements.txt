@@ -2,5 +2,8 @@ awkward
 matplotlib
 mplhep
 numpy
+pandas
+pyarrow
+streamlit
 uproot
 pyarrow

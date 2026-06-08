@@ -16,6 +16,6 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
       - name: Compile sources
-        run: python -m py_compile main_runner.py src/*.py src/analysis/*.py
+        run: python -m py_compile main_runner.py chi2_cut_study.py momentum_resolution_dashboard.py prepare_training_samples_fakes_vs_truth.py src/*.py src/analysis/*.py
       - name: Import smoke test
-        run: python -c "import main_runner; import src.analysis.composition; import src.analysis.fake_tracks; import src.analysis.root_loader; print('smoke ok')"
+        run: python -c "import main_runner; import src.analysis.composition; import src.analysis.fake_tracks; import src.analysis.root_loader; import src.analysis.momentum_resolution; print('smoke ok')"

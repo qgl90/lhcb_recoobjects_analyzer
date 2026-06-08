@@ -9,6 +9,7 @@ This repository analyzes LHCb-style reconstructed-track ROOT ntuples and focuses
 - `src/analysis/fake_tracks.py` — fake-track selection, kinematics, fits, and visualizations
 - `src/analysis/composition.py` — fake-vs-truth, ghost-rate, and PV-dependence studies
 - `src/analysis/chi2_study.py` — `chi2/ndof` cut scans and kinematic comparisons
+- `src/analysis/momentum_resolution.py` — momentum residuals, binning, and scatter/profile plots
 - `src/analysis/models.py` — shared dataclasses used across the analysis code
 
 ## Working rules
@@ -19,6 +20,7 @@ This repository analyzes LHCb-style reconstructed-track ROOT ntuples and focuses
 - Prefer reusing `TrackCompositionSample` for cut-based studies instead of loading full track objects.
 - Use `mplhep.style.use("LHCb2")` for plots.
 - Keep plots readable: larger figures, smaller markers, and explicit labels.
+- Prefer `truth_p` / `delta_p_over_p` as the default momentum-resolution axes.
 
 ## Common commands
 
