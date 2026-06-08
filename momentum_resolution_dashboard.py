@@ -6,16 +6,53 @@ import numpy as np
 
 from src.analysis.momentum_resolution import (
     build_binned_resolution,
+    fit_gaussian,
     load_resolution_frame,
+    prepare_binned_resolution,
+    selected_bin_histogram,
     select_truth_frame,
 )
+
+
+def _finite_range(values: np.ndarray, *, positive_only: bool = False) -> tuple[float, float] | None:
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    if positive_only:
+        finite = finite[finite > 0]
+    if len(finite) == 0:
+        return None
+    vmin = float(np.min(finite))
+    vmax = float(np.max(finite))
+    if vmin == vmax:
+        delta = abs(vmin) * 0.05 if vmin != 0 else 1.0
+        vmin -= delta
+        vmax += delta
+    return vmin, vmax
+
+
+def _default_range(values: np.ndarray, *, positive_only: bool = False) -> tuple[float, float]:
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    if positive_only:
+        finite = finite[finite > 0]
+    if len(finite) == 0:
+        return (0.0, 1.0)
+    low, high = np.percentile(finite, [1, 99])
+    if low == high:
+        low = float(np.min(finite))
+        high = float(np.max(finite))
+    if positive_only and low <= 0:
+        low = max(high * 1e-3, 1e-6)
+    return float(low), float(high)
 
 
 def main() -> None:
     try:
         import streamlit as st
     except ImportError as exc:  # pragma: no cover
-        raise RuntimeError("streamlit is required for the dashboard; install it with `python3 -m pip install streamlit`") from exc
+        raise RuntimeError(
+            "streamlit is required for the dashboard; install it with `python3 -m pip install streamlit`"
+        ) from exc
     import matplotlib.pyplot as plt
 
     st.set_page_config(page_title="Momentum resolution dashboard", layout="wide")
@@ -33,8 +70,7 @@ def main() -> None:
             index=0,
         )
         response_var = st.selectbox("Resolution variable", ["delta_p_over_p", "delta_pt_over_pt"], index=0)
-        n_bins = st.slider("Number of bins", min_value=6, max_value=40, value=16, step=1)
-        fit_mode = st.selectbox("Bin summary", ["moments", "gaussian"], index=0)
+        fit_mode = st.selectbox("Bin summary", ["moments", "gaussian"], index=1)
         show_all_points = st.checkbox("Show all points", value=True)
         selected_limit = None if limit == 0 else int(limit)
 
@@ -53,48 +89,101 @@ def main() -> None:
         st.warning("No truth-matched tracks passed the current selection.")
         return
 
-    summary = build_binned_resolution(
+    positive_only = bin_var in {"truth_p", "truth_pt", "reco_p", "reco_pt"}
+    bin_default_min, bin_default_max = _default_range(truth_frame[bin_var].to_numpy(), positive_only=positive_only)
+    response_default_min, response_default_max = _default_range(
+        truth_frame[response_var].to_numpy(), positive_only=False
+    )
+
+    with st.sidebar:
+        st.header("Binning")
+        bin_min = st.number_input("Bin min", value=float(bin_default_min), format="%.6g")
+        bin_max = st.number_input("Bin max", value=float(bin_default_max), format="%.6g")
+        n_bins = st.slider("Number of bins", min_value=4, max_value=40, value=16, step=1)
+        st.header("Residual window")
+        response_min = st.number_input("Residual min", value=float(response_default_min), format="%.6g")
+        response_max = st.number_input("Residual max", value=float(response_default_max), format="%.6g")
+
+    if positive_only and bin_min <= 0:
+        st.warning("Positive bin variables require bin min > 0; adjusting to a small positive value.")
+        bin_min = max(bin_max * 1e-3, 1e-6)
+    if bin_min >= bin_max:
+        st.error("Bin min must be smaller than bin max.")
+        return
+    if response_min >= response_max:
+        st.error("Residual min must be smaller than residual max.")
+        return
+
+    selected_frame, summary = prepare_binned_resolution(
         frame,
         bin_var=bin_var,
         response_var=response_var,
         n_bins=n_bins,
         chi2_max=chi2_max,
+        bin_min=bin_min,
+        bin_max=bin_max,
+        response_min=response_min,
+        response_max=response_max,
+    )
+
+    if summary.empty:
+        st.warning("No tracks remain after the current bin and residual selection.")
+        return
+
+    selected_bin_options = []
+    for index, row in summary.iterrows():
+        selected_bin_options.append(
+            f"{index}: [{row['bin_low']:.4g}, {row['bin_high']:.4g}) count={int(row['count'])}"
+        )
+    default_index = int(summary["count"].to_numpy(dtype=int).argmax())
+    selected_bin_label = st.selectbox("Inspect bin", selected_bin_options, index=default_index)
+    selected_bin_index = selected_bin_options.index(selected_bin_label)
+    bin_details = selected_bin_histogram(
+        frame,
+        bin_var=bin_var,
+        response_var=response_var,
+        bin_index=selected_bin_index,
+        n_bins=n_bins,
+        chi2_max=chi2_max,
+        bin_min=bin_min,
+        bin_max=bin_max,
+        response_min=response_min,
+        response_max=response_max,
         fit_mode=fit_mode,
     )
 
-    left, right = st.columns([1.3, 1.0])
+    left, right = st.columns([1.4, 1.0])
 
     with left:
         st.subheader("Scatter + binned profile")
-        x = truth_frame[bin_var].to_numpy(dtype=float)
-        y = truth_frame[response_var].to_numpy(dtype=float)
+        x = selected_frame[bin_var].to_numpy(dtype=float)
+        y = selected_frame[response_var].to_numpy(dtype=float)
         finite = np.isfinite(x) & np.isfinite(y)
         x = x[finite]
         y = y[finite]
-        if bin_var in {"truth_p", "truth_pt", "reco_p", "reco_pt"}:
+        if positive_only:
             positive = x > 0
             x = x[positive]
             y = y[positive]
         fig, ax = plt.subplots(figsize=(10, 7), constrained_layout=True)
         if show_all_points:
             ax.scatter(x, y, s=4, alpha=0.08, color="#7F7F7F", edgecolors="none")
-        if not summary.empty:
-            centers = summary["bin_center"].to_numpy(dtype=float)
-            mean = summary["fit_mu"].to_numpy(dtype=float) if fit_mode == "gaussian" else summary["mean"].to_numpy(dtype=float)
-            spread = summary["fit_sigma"].to_numpy(dtype=float) if fit_mode == "gaussian" else summary["std"].to_numpy(dtype=float)
-            valid = summary["count"].to_numpy(dtype=int) > 0
-            ax.errorbar(
-                centers[valid],
-                mean[valid],
-                yerr=spread[valid],
-                fmt="o-",
-                color="#2F4B7C",
-                ecolor="#2F4B7C",
-                capsize=3,
-                linewidth=2,
-                label="profile",
-            )
-        if bin_var in {"truth_p", "truth_pt", "reco_p", "reco_pt"}:
+        centers = summary["bin_center"].to_numpy(dtype=float)
+        mean = summary["fit_mu"].to_numpy(dtype=float) if fit_mode == "gaussian" else summary["mean"].to_numpy(dtype=float)
+        spread = summary["fit_sigma"].to_numpy(dtype=float) if fit_mode == "gaussian" else summary["std"].to_numpy(dtype=float)
+        valid = summary["count"].to_numpy(dtype=int) > 0
+        ax.errorbar(
+            centers[valid],
+            mean[valid],
+            yerr=spread[valid],
+            fmt="o-",
+            color="#2F4B7C",
+            ecolor="#2F4B7C",
+            capsize=3,
+            linewidth=2,
+            label="profile",
+        )
+        if positive_only:
             ax.set_xscale("log")
         ax.axhline(0, color="black", linestyle="--", linewidth=1)
         ax.set_xlabel(bin_var)
@@ -114,15 +203,45 @@ def main() -> None:
             mime="text/csv",
         )
 
-        st.subheader("Overall distribution")
-        fig2, ax2 = plt.subplots(figsize=(8, 4), constrained_layout=True)
-        ax2.hist(truth_frame[response_var].dropna(), bins=60, histtype="stepfilled", alpha=0.55, color="#4C72B0")
-        ax2.axvline(0, color="black", linestyle="--", linewidth=1)
+        st.subheader("Selected bin histogram")
+        values = np.asarray(bin_details["values"], dtype=float)
+        bin_row = bin_details["bin_row"]
+        fit_mu = float(bin_details["fit_mu"])
+        fit_sigma = float(bin_details["fit_sigma"])
+
+        fig2, ax2 = plt.subplots(figsize=(8, 4.5), constrained_layout=True)
+        if len(values):
+            low = float(bin_row["bin_low"])
+            high = float(bin_row["bin_high"])
+            hist_bins = 50
+            hist_range = (response_min, response_max)
+            ax2.hist(values, bins=hist_bins, range=hist_range, histtype="stepfilled", alpha=0.55, color="#4C72B0")
+            if np.isfinite(fit_mu) and np.isfinite(fit_sigma) and fit_sigma > 0:
+                xs = np.linspace(response_min, response_max, 400)
+                amp = len(values) * (response_max - response_min) / hist_bins
+                pdf = amp * (1.0 / (fit_sigma * np.sqrt(2.0 * np.pi))) * np.exp(-0.5 * ((xs - fit_mu) / fit_sigma) ** 2)
+                ax2.plot(xs, pdf, color="#C44E52", linewidth=2, label=f"Gaussian fit μ={fit_mu:.3g}, σ={fit_sigma:.3g}")
+            ax2.axvline(0, color="black", linestyle="--", linewidth=1)
+            ax2.set_title(f"Bin [{low:.4g}, {high:.4g}) with {len(values)} tracks")
+            ax2.legend(frameon=False)
+        else:
+            ax2.text(0.5, 0.5, "no tracks in selected bin", transform=ax2.transAxes, ha="center", va="center")
         ax2.set_xlabel(response_var)
         ax2.set_ylabel("tracks")
-        ax2.set_title("Truth-matched residual distribution")
         ax2.grid(True, alpha=0.2)
         st.pyplot(fig2, clear_figure=True)
+
+        st.subheader("Fit summary")
+        st.write(
+            {
+                "bin_range": [float(bin_row["bin_low"]), float(bin_row["bin_high"])],
+                "count": int(bin_row["count"]),
+                "mean": float(bin_row["mean"]),
+                "std": float(bin_row["std"]),
+                "fit_mu": fit_mu,
+                "fit_sigma": fit_sigma,
+            }
+        )
 
 
 if __name__ == "__main__":

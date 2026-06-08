@@ -125,6 +125,10 @@ def build_binned_resolution(
     response_var: str = "delta_p_over_p",
     n_bins: int = 20,
     chi2_max: float | None = None,
+    bin_min: float | None = None,
+    bin_max: float | None = None,
+    response_min: float | None = None,
+    response_max: float | None = None,
     fit_mode: str = "moments",
 ) -> pd.DataFrame:
     if bin_var not in frame.columns:
@@ -132,8 +136,20 @@ def build_binned_resolution(
     if response_var not in frame.columns:
         raise ValueError(f"unknown response variable: {response_var}")
 
-    selected = select_truth_frame(frame, chi2_max=chi2_max)
+    selected = frame.copy()
+    if "label" in selected.columns:
+        selected = select_truth_frame(selected, chi2_max=chi2_max)
+    elif chi2_max is not None and "chi2ndof" in selected.columns:
+        selected = selected[selected["chi2ndof"] < chi2_max].copy()
     selected = selected[[bin_var, response_var]].replace([np.inf, -np.inf], np.nan).dropna()
+    if bin_min is not None:
+        selected = selected[selected[bin_var] >= bin_min]
+    if bin_max is not None:
+        selected = selected[selected[bin_var] <= bin_max]
+    if response_min is not None:
+        selected = selected[selected[response_var] >= response_min]
+    if response_max is not None:
+        selected = selected[selected[response_var] <= response_max]
     if selected.empty:
         return pd.DataFrame(columns=["bin_low", "bin_high", "bin_center", "count", "mean", "std", "fit_mu", "fit_sigma"])
 
@@ -195,6 +211,108 @@ def build_binned_resolution(
             }
         )
     return pd.DataFrame(rows)
+
+
+def prepare_binned_resolution(
+    frame: pd.DataFrame,
+    *,
+    bin_var: str,
+    response_var: str = "delta_p_over_p",
+    n_bins: int = 20,
+    chi2_max: float | None = None,
+    bin_min: float | None = None,
+    bin_max: float | None = None,
+    response_min: float | None = None,
+    response_max: float | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    selected = select_truth_frame(frame, chi2_max=chi2_max).copy()
+    selected = selected[[bin_var, response_var]].replace([np.inf, -np.inf], np.nan).dropna()
+    if bin_min is not None:
+        selected = selected[selected[bin_var] >= bin_min]
+    if bin_max is not None:
+        selected = selected[selected[bin_var] <= bin_max]
+    if response_min is not None:
+        selected = selected[selected[response_var] >= response_min]
+    if response_max is not None:
+        selected = selected[selected[response_var] <= response_max]
+    summary = build_binned_resolution(
+        selected,
+        bin_var=bin_var,
+        response_var=response_var,
+        n_bins=n_bins,
+        chi2_max=None,
+        bin_min=bin_min,
+        bin_max=bin_max,
+        response_min=response_min,
+        response_max=response_max,
+    )
+    return selected, summary
+
+
+def fit_gaussian_moments(values: np.ndarray) -> tuple[float, float]:
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    if len(finite) == 0:
+        return float("nan"), float("nan")
+    return float(np.mean(finite)), float(np.std(finite, ddof=0))
+
+
+def fit_gaussian(values: np.ndarray, fit_mode: str = "moments") -> tuple[float, float]:
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    if len(finite) == 0:
+        return float("nan"), float("nan")
+    if fit_mode == "gaussian":
+        try:
+            from scipy.stats import norm
+
+            mu, sigma = norm.fit(finite)
+            return float(mu), float(sigma)
+        except Exception:
+            pass
+    return fit_gaussian_moments(finite)
+
+
+def selected_bin_histogram(
+    frame: pd.DataFrame,
+    *,
+    bin_var: str,
+    response_var: str,
+    bin_index: int,
+    n_bins: int,
+    chi2_max: float | None = None,
+    bin_min: float | None = None,
+    bin_max: float | None = None,
+    response_min: float | None = None,
+    response_max: float | None = None,
+    fit_mode: str = "moments",
+) -> dict[str, object]:
+    selected, summary = prepare_binned_resolution(
+        frame,
+        bin_var=bin_var,
+        response_var=response_var,
+        n_bins=n_bins,
+        chi2_max=chi2_max,
+        bin_min=bin_min,
+        bin_max=bin_max,
+        response_min=response_min,
+        response_max=response_max,
+    )
+    if summary.empty:
+        return {"values": np.asarray([], dtype=float), "summary": summary, "bin_row": None}
+    bin_index = int(np.clip(bin_index, 0, len(summary) - 1))
+    row = summary.iloc[bin_index]
+    low = float(row["bin_low"])
+    high = float(row["bin_high"])
+    values = selected[(selected[bin_var] >= low) & (selected[bin_var] < high)][response_var].to_numpy(dtype=float)
+    mu, sigma = fit_gaussian(values, fit_mode=fit_mode)
+    return {
+        "values": values,
+        "summary": summary,
+        "bin_row": row,
+        "fit_mu": mu,
+        "fit_sigma": sigma,
+    }
 
 
 def plot_momentum_resolution_scatter(
