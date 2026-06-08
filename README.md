@@ -47,7 +47,7 @@ python3 main_runner.py --composition --limit 100
 python3 chi2_cut_study.py --cuts 8,7,6,5,4,3 --limit 100
 ```
 
-That study now also produces variable-response panels showing truth efficiency and fake rejection versus `p`, `pT`, `eta`, and `phi`.
+That study now also produces pass-fraction panels showing `fake(cut) / fake(total)` and `truth(cut) / truth(total)` versus `p`, `pT`, `eta`, and `phi`.
 
 ## Outputs
 
@@ -60,7 +60,7 @@ The scripts can generate:
 - event fake rate versus number of PVs
 - event track multiplicity versus number of PVs
 - `chi2/ndof` efficiency curves and kinematic-shape comparisons
-- `chi2/ndof` truth-efficiency and fake-rejection response curves versus `p`, `pT`, `eta`, and `phi`
+- `chi2/ndof` pass-fraction curves versus `p`, `pT`, `eta`, and `phi` for fake and signal-truth tracks
 
 ## Analysis flow
 

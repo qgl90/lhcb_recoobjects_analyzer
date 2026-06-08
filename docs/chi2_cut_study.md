@@ -23,9 +23,10 @@ This script studies how a `chi2/ndof` cut changes track selection.
    - split into fake and matched-truth tracks
 
 3. **Response curves versus kinematics**
-   - truth-track efficiency vs `p`, `pT`, `eta`, `phi`
-   - fake-track rejection vs `p`, `pT`, `eta`, `phi`
-   - one panel per variable with curves for each requested cut
+   - fake pass fraction `fake(cut) / fake(total)` vs `p`, `pT`, `eta`, `phi`
+   - truth pass fraction `truth(cut) / truth(total)` vs `p`, `pT`, `eta`, `phi`
+   - top row: fake tracks, bottom row: signal truth tracks
+   - one line per requested chi2/ndof cut
 
 ## Notes
 
